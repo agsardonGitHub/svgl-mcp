@@ -1,0 +1,31 @@
+{
+  "name": "svgl-mcp",
+  "version": "0.1.0",
+  "description": "MCP server para svgl.app — descargar logos SVG de marcas/frameworks desde Claude Code/Codex/Gemini",
+  "type": "module",
+  "main": "src/index.mjs",
+  "bin": {
+    "svgl-mcp": "src/index.mjs"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "dev": "node --watch src/index.mjs",
+    "smoke": "node scripts/smoke-test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "svgl",
+    "logos",
+    "svg",
+    "claude",
+    "anthropic"
+  ],
+  "author": "Alejandro García Sardón",
+  "license": "MIT"
+}
