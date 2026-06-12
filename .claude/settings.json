@@ -1,0 +1,19 @@
+{
+    "hooks":  {
+                  "PreToolUse":  [
+                                     {
+                                         "matcher":  "Write|Edit|MultiEdit",
+                                         "hooks":  [
+                                                       {
+                                                           "type":  "command",
+                                                           "command":  "node .claude/hooks/gsd-secrets-guard.js"
+                                                       },
+                                                       {
+                                                           "type":  "command",
+                                                           "command":  "node .claude/hooks/eco-plan-gate.cjs"
+                                                       }
+                                                   ]
+                                     }
+                                 ]
+              }
+}

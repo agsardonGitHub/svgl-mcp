@@ -9,3 +9,9 @@ dist/
 Thumbs.db
 .idea/
 .vscode/
+
+# --- Ecosistema C:\dev (anadido por upgrade-repo -Adopt) ---
+# Junction al ecosistema (NO versionada — cada PC la recrea)
+.claude/rules/
+.secrets/
+.upgrade-backup-*/

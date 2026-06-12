@@ -1,0 +1,9 @@
+﻿{
+    "profile":  "ligero",
+    "templateVersion":  "5.0.0",
+    "criticalPaths":  [
+
+                      ],
+    "brand":  false,
+    "notas":  "MCP server pequeno, termina-y-olvida."
+}
