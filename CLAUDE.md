@@ -19,17 +19,33 @@ El hook `eco-session-start` imprime automáticamente al abrir sesión: perfil, C
 
 Las reglas (`.claude/rules/`) viven en DOS carpetas:
 
-- **`.claude/rules/`** — reglas heredadas del ecosistema vía junction a `C:\dev\.claude\rules` (creada por `crear-nuevo-repo.ps1`). Rules canónicas vigentes: `ecosystem`, `secrets`, `windows`, `conventions`, `multi-agent`, `observability`, `tier-model`, `prompt-lifecycle`, `plan-mode`, `prompt-bloqueo`, `clean-architecture`, `mode-router`, `adoption-profiles`. **Se cargan TODAS automáticamente en cada sesión.** NO editar — modificar el ecosistema raíz vía prompt numerado.
+- **`.claude/rules/`** — reglas heredadas del ecosistema vía junction a `C:\dev\.claude\rules` (creada por `crear-nuevo-repo.ps1`). Las 9 rules canónicas (post-dieta 0026.1): `ecosystem`, `secrets`, `windows`, `conventions`, `gates` (tiers + Plan Mode + bloqueo), `multi-agent`, `prompt-lifecycle`, `mode-router`, `adoption-profiles`. **Se cargan TODAS automáticamente en cada sesión** (~23 KB). Detalle extendido bajo demanda: `C:\dev\.claude\docs\detalle\`. NO editar — modificar el ecosistema raíz vía prompt numerado.
 - **`.claude/rules-domain/`** — reglas locales del proyecto: stack-specific (`typescript.md`, `prisma.md`, sembradas desde `rules-domain-seed/` del template), dominio-específico, workflow-específico. Editar libremente. ⚠️ NO se cargan automáticamente: referéncialas desde este CLAUDE.md o invócalas al trabajar el área.
 
 Si el repo se generó SIN ecosistema padre (modo standalone), `rules/` contiene rules locales (no junction).
 
-## Gates obligatorios (resumen operativo)
+## Modo plan AUTOMATICO (0034e — no esperar a que el admin lo pulse)
 
-- **Plan Mode Tier 2-3**: plan formal + OK explícito del admin ANTES de tocar código (`plan-mode.md`). El hook `eco-plan-gate` lo verifica técnicamente según el perfil del manifiesto.
+**Peticion NUEVA del admin que sea Tier 2-3** (toca >3 archivos, esquema, arquitectura, plano de
+control, o abre un programa de varios pasos) → **entrar SOLO en modo plan** (`EnterPlanMode`),
+disenar y presentarlo con `ExitPlanMode`. No hay que esperar a que el admin lo active.
+
+**NO aplica** (van directas, sin modo plan):
+- Sub-prompts de un plan YA aprobado → directos al gate de Codex (`auto-gate.cjs`).
+- Tier 1 trivial (≤3 archivos reversibles, sin criterio nuevo).
+- Conversacion, preguntas, diagnostico sin cambios.
+
+La division es esta y no se mezcla: **el admin aprueba EL PLAN** (modo plan automatico) y
+**Codex aprueba los pasos** (gate firmado). Ni una aprobacion de mas, ni una de menos.
+
+## Gates obligatorios (resumen operativo · ADR-ECO-001)
+
+- **Gate IA Tier 2-3**: plan formal → `node <ECOSYSTEM_ROOT>/Tools/PlantillaRepos/scripts/utils/auto-gate.cjs --plan <plan.md> --prompt-numero NNNN`. Codex emite GO/ITERA/NOGO y el GO se firma en `CURRENT_PROMPT.md`. **NO pedir OK al admin**: aprobó el plan, no las fases.
+- **Ejecución sin paradas**: el hook Stop `eco-stop-continue` impide terminar con el plan a medias (máx 3 continuaciones; escape `**Estado:** BLOQUEADO`).
 - **Rutas críticas**: tocar un glob de `criticalPaths` = Tier 2 mínimo con gate, aunque sea 1 archivo.
-- **Modelo por tarea**: los agents del kit llevan su modelo asignado (`mode-router.md`); para el hilo principal, recomendar `/model` al detectar mismatch.
-- **Multi-agente** (`multi-agent.md`): Tier 2-3 → plan Gemini + review Codex vía wrapper, con fallback en 3 niveles.
+- **Líneas rojas del admin** (auto-rechazo del gate + cola en `state/PLANES-PENDIENTES.md`): plano de control (rules/hooks/settings/presets/wrapper/workflows/manifiestos), destructivos irreversibles, secretos, dinero real y auth.
+- **Modelo por tarea**: los agents del kit llevan su modelo asignado (`mode-router.md`).
+- **Revisores** (`multi-agent.md`): Codex titular; Gemini opcional; a la 3ª caída de Codex revisa un subagente Claude y se continúa.
 
 ## Rules de dominio del stack
 
@@ -65,9 +81,11 @@ Bloques PowerShell canonicos en `.claude/rules/prompt-lifecycle.md` seccion "Obs
 
 **Tier 1 — Autonomo SIEMPRE (resolver inline)**: fallos, oportunidades <5 min, refactors locales reversibles. Condiciones: ≤3 archivos, sin cambio API publica, sin cambio schema, sin cambio i18n keys.
 
-**Tier 2 — Autonomo CON REPORTE EXPLICITO (commit separado revertible)**: refactors medianos (<30 min), tests faltantes del scope, mejoras de cobertura de tipos. Condiciones: ≤8 archivos, sin cambio schema, sin cambio API publica, sin cambio comportamiento observable.
+**Tier 2 — Gate IA + ejecucion hasta el final (commit separado revertible)**: refactors medianos (<30 min), tests faltantes del scope, mejoras de cobertura de tipos. Condiciones: ≤8 archivos, sin cambio schema, sin cambio API publica, sin cambio comportamiento observable.
 
-**Tier 3 — SIEMPRE esperar aprobacion (propagar al backlog)**: decision arquitectonica, DROP/ALTER destructivos, refactor mayor (>30 min o >8 archivos), cambios en CI/hooks/workflows, breaking changes de API publica, cambios de naming/marca.
+**Tier 3 — Gate IA reforzado con tabla de riesgos**: decision arquitectonica, refactor mayor (>30 min o >8 archivos), breaking changes de API publica.
+
+**Lineas rojas del admin (encolar en `state/PLANES-PENDIENTES.md`, no bloquear la sesion)**: plano de control (rules/hooks/settings/presets/wrapper/workflows/manifiestos), destructivos irreversibles (DROP/ALTER, borrado masivo, force push), secretos, dinero real y auth, naming/marca.
 
 Detalle completo en `.claude/rules/prompt-lifecycle.md`.
 
@@ -116,20 +134,15 @@ Seguido de:
 - Si surgieron decisiones abiertas → `.claude/state/DECISIONES-ACTIVAS.md`.
 - Si cierras a mitad de tarea → llenar `.claude/state/HANDOFF.md`.
 
-### 8. Fetch + check divergencia pre-commit (OBLIGATORIO)
+### 8. Sincronia pre-push (OBLIGATORIO, automatico)
 
 Antes del commit final conventional:
 
 ```bash
-git fetch origin main
-BEHIND=$(git log HEAD..origin/main --oneline | wc -l)
-if [ "$BEHIND" -gt 0 ]; then
-  echo "⚠️ $BEHIND commits en origin/main no locales. Consultar admin antes de pullrebase."
-  exit 1
-fi
+git pull --rebase --autostash origin main
 ```
 
-Razon: si se trabaja multi-PC, puede haber commits de otro PC sin pullear. Sin check, push final falla con `non-fast-forward`.
+Automatico y silencioso — **no consultar al admin** (`windows.md` §Sincronia con remoto). Razon: el bot de release y el CI adelantan `main` por su cuenta; sin esto el push final falla con `non-fast-forward`.
 
 ### 9. Commit, push verificado y CI verde
 

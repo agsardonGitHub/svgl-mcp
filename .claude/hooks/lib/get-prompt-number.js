@@ -13,7 +13,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const PROMPT_REGEX = /\*\*N(?:ú|u)mero:\*\*[\s\t]+(\d{4}(?:\.\d+[a-z]?)?)/;
+// [0028b] Acepta tambien sub-prompts con letra directa (`0028a`) ademas del
+// formato con punto (`0026.1`, `0722.2c`).
+const PROMPT_REGEX = /\*\*N(?:ú|u)mero:\*\*[\s\t]+(\d{4}(?:\.\d+)?[a-z]?)/;
 
 function stripBom(str) {
   if (!str) return str;
