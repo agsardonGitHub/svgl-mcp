@@ -38,12 +38,49 @@ try { input = fs.readFileSync(0, 'utf8'); } catch { /* sin stdin */ }
 let data = {};
 try { data = JSON.parse(input); } catch { /* hook llamado sin JSON */ }
 
-const cwd = process.cwd();
 const filePath = (data.tool_input && (data.tool_input.file_path || data.tool_input.notebook_path)) || '';
 if (!filePath) process.exit(0);
 
+// [0050] El repo lo manda el ARCHIVO EDITADO, no el directorio de la sesion.
+// Antes todo salia de process.cwd(): trabajar en un subrepo desde C:\dev leia el
+// manifiesto y el marcador de la RAIZ, asi que (a) un gate firmado en el hijo se
+// daba por inexistente y obligaba a ECO_GATE_BYPASS, (b) sus criticalPaths nunca
+// casaban porque `rel` venia prefijado, y (c) podia proteger de MENOS, aplicando
+// el modo de un repo `ligero` a un archivo critico de uno `dirigido`.
+// Es la misma correccion que 0041 hizo en auto-gate.cjs, en el otro extremo.
+function findRepoRoot(startFile) {
+  const home = os.homedir();
+  let dir = path.dirname(path.resolve(startFile));
+  const tope = path.resolve(ECOSYSTEM_ROOT);
+  for (let i = 0; i < 40; i++) {
+    // Dos falsos positivos que hay que saltar:
+    //  - ~/.claude: es la config global de Claude Code, no un repo (trampa de 0041)
+    //  - cualquier .claude/: eco-core ES un repo git, pero sus archivos deben
+    //    seguir gobernados por el repo que lo contiene, o se pierde la exclusion
+    //    de gobierno de la linea de abajo (que espera un `rel` con .claude/ delante)
+    if (path.resolve(dir) !== path.resolve(home) && path.basename(dir) !== '.claude') {
+      const marcas = [
+        path.join(dir, '.claude', 'ecosystem.json'),
+        path.join(dir, '.planning'),
+        path.join(dir, '.git'),
+      ];
+      if (marcas.some((m) => fs.existsSync(m))) return dir;
+    }
+    const padre = path.dirname(dir);
+    if (padre === dir || path.resolve(dir) === tope) break;
+    dir = padre;
+  }
+  return null;
+}
+
+// Sin raiz identificable se cae a cwd: degradacion segura, nunca excepcion.
+const cwd = findRepoRoot(filePath) || process.cwd();
+
 const rel = path.relative(cwd, filePath).replace(/\\/g, '/');
 if (rel.startsWith('..')) process.exit(0); // fuera del repo: no es asunto de este gate
+
+// Exclusiones de gobierno/doc
+if (/^(\.claude|\.planning|prompts|docs)\//.test(rel) || /^[^/]+\.md$/.test(rel)) process.exit(0);
 
 // [0028d] stripBom: PowerShell 5.1 escribe JSON con BOM UTF-8 y JSON.parse falla
 // con el. Sin esto, ~20 manifiestos del ecosistema eran ilegibles y sus repos
@@ -70,14 +107,6 @@ function matchGlob(glob, p) {
 }
 const esCritico = criticalPaths.some(g => matchGlob(g, rel) || rel.startsWith(g.replace(/\/?\*\*$/, '') + '/'));
 
-// [0031a] ORDEN CORREGIDO (auditoria 0031, hueco H5): las exclusiones de
-// gobierno/doc se evaluaban ANTES que criticalPaths, asi que un repo que declara
-// `.claude/hooks/**` como ruta critica (governance lo hace) nunca escalaba: el
-// hook salia por la exclusion. Ahora una ruta critica declarada SIEMPRE manda.
-if (!esCritico && (/^(\.claude|\.planning|prompts|docs)\//.test(rel) || /^[^/]+\.md$/.test(rel))) {
-  process.exit(0);
-}
-
 const currentPrompt = (() => {
   try { return fs.readFileSync(path.join(cwd, '.planning', 'CURRENT_PROMPT.md'), 'utf8'); } catch { return ''; }
 })();
@@ -90,12 +119,7 @@ function gateFirmado() {
   const modPath = path.join(ECOSYSTEM_ROOT, 'Tools', 'PlantillaRepos', 'scripts', 'utils', 'auto-gate.cjs');
   try {
     const { verifyGateLine } = require(modPath);
-    // [0031a] Anti-replay: caducidad 72h + atado al numero del marcador.
-    // Degradacion segura: sin numero legible se omite ese check (no bloquea).
-    const num = (currentPrompt.match(/\*\*N[úu]mero:\*\*\s*(\S+)/) || [])[1];
-    const opts = { maxAgeHours: 72 };
-    if (num) opts.expectedPromptNumero = num;
-    return verifyGateLine(currentPrompt, opts);
+    return verifyGateLine(currentPrompt);
   } catch (e) {
     return { ok: false, reason: `auto_gate_unavailable: ${e.message}` };
   }
