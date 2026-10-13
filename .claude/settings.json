@@ -1,24 +1,47 @@
 {
-    "hooks":  {
-                  "PreToolUse":  [
-                                     {
-                                         "matcher":  "Write|Edit|MultiEdit",
-                                         "hooks":  [
-                                                       {
-                                                           "type":  "command",
-                                                           "command":  "node .claude/hooks/gsd-secrets-guard.js"
-                                                       },
-                                                       {
-                                                           "type":  "command",
-                                                           "command":  "node .claude/hooks/eco-plan-gate.cjs"
-                                                       }
-                                                   ]
-                                     }
-                                 ]
-              },
-    "env":  {
-                "ECO_GATE_MODE":  "ia",
-                "ECO_GATE_ENFORCE":  "1",
-                "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":  "1"
-            }
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/gsd-secrets-guard.js"
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/eco-plan-gate.cjs"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/gsd-secrets-guard.js"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read|WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \".claude/hooks/gsd-read-injection-scanner.js\" 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "ECO_GATE_MODE": "ia",
+    "ECO_GATE_ENFORCE": "1",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "permissions": {
+    "ask": []
+  }
 }

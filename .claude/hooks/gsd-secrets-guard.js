@@ -156,7 +156,15 @@ const SUMIDERO_PUBLICABLE = [
   />>?\s*(?!\/dev\/null)/,       // redireccion a archivo (salvo /dev/null)
   /\|\s*(?:tee|clip|pbcopy)\b/,
   /\bcurl\b[^|;]*\b-d\b/,        // envio a un endpoint
+  /\bgit\s+(?:commit|tag)\b/i,   // [0112] mensaje de commit o de etiqueta: sale con el push
+  /\bgh\b[^|;&]*--(?:body|title|notes)\b/i, // [0112] cuerpo o titulo de una issue, un PR o una release
 ];
+
+// [0112] Cada orden de la linea se juzga por separado: un `export` legitimo al
+// principio no puede aprobar un `echo` al archivo que va detras (revision 0112).
+function ordenes(cmd) {
+  return cmd.split(/\r?\n|;|&&|\|\|/).map((s) => s.trim()).filter(Boolean);
+}
 
 function revisarBash(data) {
   const cmd = data.tool_input?.command || '';
@@ -165,11 +173,11 @@ function revisarBash(data) {
   const hallazgos = buscarCredencial(cmd);
   if (!hallazgos.length) process.exit(0); // sin valor literal: nada que vigilar
 
-  // Hay un valor de credencial en el comando. ¿Es un uso legitimo conocido?
-  if (USO_LEGITIMO.some((re) => re.test(cmd))) process.exit(0);
-
-  // ¿Va hacia una salida publicable?
-  if (SUMIDERO_PUBLICABLE.some((re) => re.test(cmd))) {
+  // Hay un valor de credencial en el comando. Solo cuentan las ordenes que lo llevan.
+  const conValor = ordenes(cmd).filter((o) => buscarCredencial(o).length);
+  const legitima = (o) => USO_LEGITIMO.some((re) => re.test(o));
+  // ¿Alguna lo lleva hacia una salida publicable sin ser un uso legitimo conocido?
+  if (conValor.some((o) => !legitima(o) && SUMIDERO_PUBLICABLE.some((re) => re.test(o)))) {
     bloquear(
       `${hallazgos.length} credencial(es) en un comando que las expone`,
       hallazgos,
@@ -177,6 +185,8 @@ function revisarBash(data) {
         `texto del comando (queda en el historial de la shell) ni hacia pantalla o archivo.`,
     );
   }
+
+  if (conValor.length && conValor.every(legitima)) process.exit(0);
 
   // Valor literal como argumento visible: queda en el historial aunque no se
   // imprima. Se avisa sin bloquear — es mal habito, no fuga inmediata.

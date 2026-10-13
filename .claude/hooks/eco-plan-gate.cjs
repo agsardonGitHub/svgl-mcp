@@ -23,15 +23,21 @@
  * Bypass puntual justificado: ECO_GATE_BYPASS=1 (declarar en el reporte).
  *
  * Exclusiones: archivos bajo .claude/, .planning/, prompts/, docs/ y *.md de
- * raiz no cuentan para el umbral (trabajo de gobierno/documentacion).
+ * raiz no cuentan para el umbral (trabajo de gobierno/documentacion) —
+ * SALVO que sean criticalPaths declarados del repo, que siempre exigen gate
+ * (candado del 0031a, repuesto en 0066 tras perderse en la sincronizacion 0052).
  */
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
+// [0112] Sin la lib (un hijo a medio actualizar), lo de antes: el gate no puede
+// romperse por eso, porque un hook que lanza deja pasar la edicion.
+let raizEcosistema;
+try { ({ raizEcosistema } = require('./lib/raiz-ecosistema.js')); } catch { raizEcosistema = () => process.env.ECOSYSTEM_ROOT || 'C:\\dev'; }
+
 const UMBRAL_ARCHIVOS = 3;
 const GATE_MODE = (process.env.ECO_GATE_MODE || 'ia').toLowerCase();
-const ECOSYSTEM_ROOT = process.env.ECOSYSTEM_ROOT || 'C:\\dev';
 
 let input = '';
 try { input = fs.readFileSync(0, 'utf8'); } catch { /* sin stdin */ }
@@ -48,10 +54,10 @@ if (!filePath) process.exit(0);
 // casaban porque `rel` venia prefijado, y (c) podia proteger de MENOS, aplicando
 // el modo de un repo `ligero` a un archivo critico de uno `dirigido`.
 // Es la misma correccion que 0041 hizo en auto-gate.cjs, en el otro extremo.
-function findRepoRoot(startFile) {
+function findRepoRoot(startFile, raizProvisional) {
   const home = os.homedir();
   let dir = path.dirname(path.resolve(startFile));
-  const tope = path.resolve(ECOSYSTEM_ROOT);
+  const tope = path.resolve(raizProvisional);
   for (let i = 0; i < 40; i++) {
     // Dos falsos positivos que hay que saltar:
     //  - ~/.claude: es la config global de Claude Code, no un repo (trampa de 0041)
@@ -74,13 +80,14 @@ function findRepoRoot(startFile) {
 }
 
 // Sin raiz identificable se cae a cwd: degradacion segura, nunca excepcion.
-const cwd = findRepoRoot(filePath) || process.cwd();
+// [0112] La raiz del ecosistema sale del repo del archivo editado (lib/raiz-ecosistema.js),
+// no de una ruta fija: primero una provisional desde la carpeta del archivo, que
+// solo sirve de tope a la subida, y despues la definitiva desde el repo encontrado.
+const cwd = findRepoRoot(filePath, raizEcosistema(path.dirname(path.resolve(filePath)))) || process.cwd();
+const ECOSYSTEM_ROOT = raizEcosistema(cwd);
 
 const rel = path.relative(cwd, filePath).replace(/\\/g, '/');
 if (rel.startsWith('..')) process.exit(0); // fuera del repo: no es asunto de este gate
-
-// Exclusiones de gobierno/doc
-if (/^(\.claude|\.planning|prompts|docs)\//.test(rel) || /^[^/]+\.md$/.test(rel)) process.exit(0);
 
 // [0028d] stripBom: PowerShell 5.1 escribe JSON con BOM UTF-8 y JSON.parse falla
 // con el. Sin esto, ~20 manifiestos del ecosistema eran ilegibles y sus repos
@@ -107,6 +114,15 @@ function matchGlob(glob, p) {
 }
 const esCritico = criticalPaths.some(g => matchGlob(g, rel) || rel.startsWith(g.replace(/\/?\*\*$/, '') + '/'));
 
+// [0031a·repuesto 0066] ORDEN: las rutas criticas se evaluan ANTES que las
+// exclusiones de gobierno/doc. Al reves —como quedo tras la sincronizacion de
+// hooks del 0052— un repo que declara `.claude/hooks/**` o `.claude/rules/**`
+// como ruta critica NUNCA escalaba a gate: la exclusion documental salia antes
+// y devolvia exit 0. Es el hueco H5 de la auditoria 0031.
+if (!esCritico && (/^(\.claude|\.planning|prompts|docs)\//.test(rel) || /^[^/]+\.md$/.test(rel))) {
+  process.exit(0);
+}
+
 const currentPrompt = (() => {
   try { return fs.readFileSync(path.join(cwd, '.planning', 'CURRENT_PROMPT.md'), 'utf8'); } catch { return ''; }
 })();
@@ -119,7 +135,13 @@ function gateFirmado() {
   const modPath = path.join(ECOSYSTEM_ROOT, 'Tools', 'PlantillaRepos', 'scripts', 'utils', 'auto-gate.cjs');
   try {
     const { verifyGateLine } = require(modPath);
-    return verifyGateLine(currentPrompt);
+    // [0031a·repuesto 0066] Anti-replay: la firma caduca a las 72 h y queda
+    // atada al numero del marcador. Sin estas dos opciones, una linea GATE
+    // legitima de hace semanas seguia abriendo el gate indefinidamente.
+    const numeroMarcador = (currentPrompt.match(/\*\*N[úu]mero:\*\*\s*(\S+)/) || [])[1];
+    const opts = { maxAgeHours: 72 };
+    if (numeroMarcador) opts.expectedPromptNumero = numeroMarcador;
+    return verifyGateLine(currentPrompt, opts);
   } catch (e) {
     return { ok: false, reason: `auto_gate_unavailable: ${e.message}` };
   }
