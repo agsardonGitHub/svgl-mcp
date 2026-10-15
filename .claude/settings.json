@@ -6,11 +6,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/gsd-secrets-guard.js"
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/gsd-secrets-guard.js\""
           },
           {
             "type": "command",
-            "command": "node .claude/hooks/eco-plan-gate.cjs"
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/eco-plan-gate.cjs\""
           }
         ]
       },
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/gsd-secrets-guard.js"
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/gsd-secrets-guard.js\""
           }
         ]
       }
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \".claude/hooks/gsd-read-injection-scanner.js\" 2>/dev/null || true"
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/gsd-read-injection-scanner.js\" 2>/dev/null || true"
           }
         ]
       }

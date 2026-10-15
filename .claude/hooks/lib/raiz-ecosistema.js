@@ -83,4 +83,27 @@ function raizEcosistema(desde = process.cwd()) {
   return raiz;
 }
 
-module.exports = { raizEcosistema, esRaizValida, NIVELES };
+/**
+ * [0124] La carpeta cuyo `.planning/CURRENT_PROMPT.md` vale para la sesion: la
+ * primera subiendo desde `desde` que lo tenga, sin salir del repo que la contiene.
+ * Si el repo no tiene marcador, el propio repo; fuera de un repo, se sigue subiendo
+ * (la raiz del ecosistema no es un repo git). Sin nada, `desde`.
+ *
+ * Tras un cambio de carpeta dentro del repo, process.cwd() ya no tiene el marcador
+ * al lado y los hooks de cierre dejaban parar un plan a medias. Un cambio de
+ * carpeta a otro repo (el de la app de escritorio) sigue mirando el marcador de
+ * ese repo, como antes.
+ */
+function carpetaDelMarcador(desde = process.cwd()) {
+  const inicio = path.resolve(String(desde || process.cwd()));
+  let d = inicio;
+  for (;;) {
+    try { if (fs.statSync(path.join(d, '.planning', 'CURRENT_PROMPT.md')).isFile()) return d; } catch { /* sigue */ }
+    try { fs.lstatSync(path.join(d, '.git')); return d; } catch { /* no es la raiz de un repo */ }
+    const padre = path.dirname(d);
+    if (padre === d) return inicio;
+    d = padre;
+  }
+}
+
+module.exports = { raizEcosistema, esRaizValida, carpetaDelMarcador, NIVELES };
