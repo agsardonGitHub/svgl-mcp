@@ -33,28 +33,26 @@ pwsh <raíz>/Tools/PlantillaRepos/scripts/install-git-hooks.ps1 -RepoPath <ruta-
 
 Sin PowerShell 7, `powershell -NoProfile -File` con los mismos argumentos. El pre-commit solo actúa en los perfiles completo y dirigido. Git tampoco versiona `.claude/settings.local.json`: mientras falte, `ECOSYSTEM_ROOT` no está definida y en las órdenes de abajo se escribe la ruta de la raíz en su lugar.
 
-## Modo plan AUTOMATICO (0034e — no esperar a que el admin lo pulse)
+## Prompt del plan y modo plan (0136)
 
-**Peticion NUEVA del admin que sea Tier 2-3** (toca >3 archivos, esquema, arquitectura, plano de
-control, o abre un programa de varios pasos) → **entrar SOLO en modo plan** (`EnterPlanMode`),
-disenar y presentarlo con `ExitPlanMode`. No hay que esperar a que el admin lo active.
+Las peticiones del chat **ya no entran solas en modo plan**: la app exige allí una aprobación humana
+que el CEO ya no da. Una petición Tier 2-3 sigue este camino: el prompt del plan va a
+`.planning/drafts/NNNN-prompt-del-plan.md`, Codex lo revisa con `review-plan` (ITERA máx 3,
+veredicto en `.revision-*.md`), y el plan formal pasa por `auto-gate.cjs`. La regla 0091 (modo plan
+sin consola) vale cuando el CEO activa el modo plan a mano.
 
-**NO aplica** (van directas, sin modo plan):
-- Sub-prompts de un plan YA aprobado → directos al gate de Codex (`auto-gate.cjs`).
-- Tier 1 trivial (≤3 archivos reversibles, sin criterio nuevo).
-- Conversacion, preguntas, diagnostico sin cambios.
-
-La division es esta y no se mezcla: **el admin aprueba EL PLAN** (modo plan automatico) y
-**Codex aprueba los pasos** (gate firmado). Ni una aprobacion de mas, ni una de menos.
+La division es esta y no se mezcla: **el CEO decide el diseño** y **Codex aprueba el plan y los
+pasos** (gate firmado).
 
 ## Gates obligatorios (resumen operativo · ADR-ECO-001)
 
-- **Gate IA Tier 2-3**: plan formal → `node "$ECOSYSTEM_ROOT/Tools/PlantillaRepos/scripts/utils/auto-gate.cjs" --plan <plan.md> --prompt-numero NNNN`. El kit define `ECOSYSTEM_ROOT` en `.claude/settings.local.json` y la consola de la sesión la recibe (en PowerShell, `$env:ECOSYSTEM_ROOT`). Codex emite GO/ITERA/NOGO y el GO se firma en `CURRENT_PROMPT.md`. **NO pedir OK al admin**: aprobó el plan, no las fases.
+- **Gate IA Tier 2-3**: plan formal → `node "$ECOSYSTEM_ROOT/Tools/PlantillaRepos/scripts/utils/auto-gate.cjs" --plan <plan.md> --prompt-numero NNNN`. El kit define `ECOSYSTEM_ROOT` en `.claude/settings.local.json` y la consola de la sesión la recibe (en PowerShell, `$env:ECOSYSTEM_ROOT`). Codex emite GO/ITERA/NOGO y el GO se firma en `CURRENT_PROMPT.md`. **NO pedir OK al CEO**: no aprueba planes ni fases.
 - **Ejecución sin paradas** (completo y dirigido): el hook Stop `eco-stop-continue` impide terminar con el plan a medias (máx <!-- inv:umbral.continuaciones -->12<!-- /inv --> continuaciones por sesión; escape `**Estado:** BLOQUEADO`). Solo retiene a la sesión que nombra la línea `**Sesión:**` del marcador, que escribe `auto-gate` al firmar.
 - **Rutas críticas**: tocar un glob de `criticalPaths` = Tier 2 mínimo con gate, aunque sea 1 archivo.
-- **Líneas rojas del admin** (auto-rechazo del gate + cola en `<raíz>\.claude\state\PLANES-PENDIENTES.md`, la de la raíz): plano de control (rules/hooks/settings/presets/wrapper/workflows/manifiestos), destructivos irreversibles, secretos, dinero real y auth.
+- **Plano de control y zona roja** (rules/hooks/settings/presets/wrapper/workflows/manifiestos, CLAUDE.md/AGENTS.md; y los globos `zonaRoja` del manifiesto: dinero real, accesos, datos clínicos, secretos): doble GO de Codex. `eco-plan-gate` bloquea la escritura y el `pre-commit` el commit, aunque sea de un archivo, sin firma `codex` o `admin` de un plan que los declare.
+- **Líneas rojas del CEO** (cola en `<raíz>\.claude\state\PLANES-PENDIENTES.md`, la de la raíz): destructivos irreversibles, secretos, dinero real y accesos.
 - **Modelo por tarea**: los agents del kit llevan su modelo asignado (`mode-router.md`).
-- **Revisores** (`multi-agent.md`): Codex es el único revisor externo; si cae <!-- inv:umbral.fallos_normal -->1<!-- /inv --> vez en trabajo normal (<!-- inv:umbral.fallos_control -->3<!-- /inv --> en plano de control) revisa un subagente Claude de contexto limpio y se continúa.
+- **Revisores** (`multi-agent.md`): Codex es el único revisor externo; si cae <!-- inv:umbral.fallos_normal -->1<!-- /inv --> vez en trabajo normal revisa un subagente Claude de contexto limpio y se continúa. En plano de control y zona roja Claude no aprueba nunca: el plan espera encolado a Codex o a un sí del CEO en el chat, firmado `revisor=admin` con su cita.
 - **Consumo del revisor** (0084): cada invocación deja modelo, esfuerzo (`medium`; `ECO_CODEX_EFFORT`) y tokens en `<raíz>\.claude\state\external-agents.log`, y el veredicto los hereda. Resumen: `node "$ECOSYSTEM_ROOT/Tools/PlantillaRepos/scripts/utils/resumen-consumo.cjs" --desde <fecha>`.
 
 ## Rules de dominio del stack
@@ -94,7 +92,7 @@ Bloques PowerShell canonicos en `<raíz>\.claude\docs\detalle\observability.md` 
 
 **Tier 3 — Gate IA reforzado con tabla de riesgos**: decision arquitectonica, refactor mayor (>30 min o >8 archivos), breaking changes de API publica.
 
-**Lineas rojas del admin (encolar en `<raíz>\.claude\state\PLANES-PENDIENTES.md`, la cola de la raíz, sin bloquear la sesion)**: plano de control (rules/hooks/settings/presets/wrapper/workflows/manifiestos), destructivos irreversibles (DROP/ALTER, borrado masivo, force push), secretos, dinero real y auth, naming/marca.
+**Lineas rojas del CEO (encolar en `<raíz>\.claude\state\PLANES-PENDIENTES.md`, la cola de la raíz, sin bloquear la sesion)**: destructivos irreversibles (DROP/ALTER, borrado masivo, force push), secretos, dinero real y accesos. El naming y la marca son decisión de diseño del CEO. El plano de control (rules/hooks/settings/presets/wrapper/workflows/manifiestos) lo aprueba Codex con doble GO y, sin Codex, espera a Codex o al CEO.
 
 Detalle completo en `.claude/rules/prompt-lifecycle.md`.
 
