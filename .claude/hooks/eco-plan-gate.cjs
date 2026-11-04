@@ -17,8 +17,10 @@
  * globos `zonaRoja` del manifiesto de cada repo y silo de secretos (nunca la lista
  * de respaldo; los archivos del ritual, fuera). Una ruta protegida exige el
  * marcador del repo git que contiene el archivo (el de la raiz si no hay repo) con
- * EN_EJECUCION, firma valida con revisor `codex` o `admin` y la ruta declarada,
- * literal, en el plan firmado. Si falta algo, sale con 2 SIN depender de
+ * EN_EJECUCION, firma valida con revisor `codex` o `admin` (o, desde el 0141 y solo
+ * en plano de control que no sea zona roja, `claude-doble`: dos veredictos Claude
+ * sin Codex) y la ruta declarada, literal, en el plan firmado. La decision la toma
+ * verificarRutaProtegida() de auto-gate.cjs. Si falta algo, sale con 2 SIN depender de
  * ECO_GATE_ENFORCE, de ECO_GATE_MODE ni de ECO_GATE_BYPASS. Sin auto-gate.cjs (o
  * ilegible), bloquea solo lo que case con los globos fijos copiados aqui; si la
  * comprobacion de la firma lanza, bloquea. No ve lo que se escribe desde la
@@ -33,7 +35,8 @@
  *   ia    (DEFAULT) → .planning/CURRENT_PROMPT.md con EN_EJECUCION **Y** linea
  *                     `GATE: GO ... firma=<hmac>` VALIDA (firmada por
  *                     auto-gate.cjs: veredicto de Codex, fallback Claude en
- *                     trabajo normal, o si del CEO firmado `revisor=admin` con su
+ *                     trabajo normal, doble fallback Claude en plano de control
+ *                     (0141), o si del CEO firmado `revisor=admin` con su
  *                     cita). Una linea escrita a mano NO abre el gate.
  *   admin           → comportamiento pre-0028: basta EN_EJECUCION (rollback en
  *                     una sola variable de entorno). No abre rutas protegidas.
@@ -72,9 +75,11 @@ if (!filePathRecibida) process.exit(0);
 function bloquear(ruta, tipo, motivo) {
   process.stderr.write(
     `[eco-plan-gate BLOQUEO] "${ruta}" es ${tipo}: ${motivo}.\n` +
-      'Plano de control y zona roja exigen el marcador EN_EJECUCION con firma codex o admin ' +
-      'de un plan que declare esta ruta, aunque sea un solo archivo. Sin Codex, el plan espera ' +
-      'encolado a Codex o al CEO (gates.md, ADR-ECO-002). Ni ECO_GATE_BYPASS ni ECO_GATE_MODE lo abren.\n',
+      'Plano de control y zona roja exigen el marcador EN_EJECUCION con firma de un plan que ' +
+      'declare esta ruta, aunque sea un solo archivo: codex o admin, o claude-doble (dos veredictos ' +
+      'Claude sin Codex) solo en plano de control fuera del nucleo del gate. La zona roja y el nucleo ' +
+      'del gate sin Codex esperan a Codex o al CEO ' +
+      '(gates.md, ADR-ECO-003). Ni ECO_GATE_BYPASS ni ECO_GATE_MODE lo abren.\n',
   );
   process.exit(2);
 }
@@ -157,7 +162,11 @@ const cwd = findRepoRoot(filePath, raizEcosistema(path.dirname(path.resolve(file
 const ECOSYSTEM_ROOT = raizEcosistema(cwd);
 
 const rel = path.relative(cwd, filePath).replace(/\\/g, '/');
-if (rel.startsWith('..')) process.exit(0); // fuera del repo: no es asunto de este gate
+// [0141][segunda revision] Fuera del repo el resto del gate no aplica, pero los
+// ajustes, los ganchos y los secretos (la clave del HMAC, por ejemplo) se
+// comprueban igual antes de salir: `~/.claude/settings.json` fija el entorno de
+// cada sesion. Los briefings y la memoria de fuera del repo siguen libres.
+const fueraDelRepo = rel.startsWith('..');
 
 // [0028d] stripBom: PowerShell 5.1 escribe JSON con BOM UTF-8 y JSON.parse falla
 // con el. Sin esto, ~20 manifiestos del ecosistema eran ilegibles y sus repos
@@ -174,7 +183,9 @@ const manifest = readJsonSafe(path.join(cwd, '.claude', 'ecosystem.json'));
 const profile = (manifest && manifest.profile) || 'dirigido';
 const criticalPaths = (manifest && manifest.criticalPaths) || [];
 const mode = { completo: 'estricto', dirigido: 'rutas-criticas', ligero: 'solo-criticos', exento: 'ninguno' }[profile] || 'rutas-criticas';
-if (mode === 'ninguno') process.exit(0);
+// [0141][revision adversarial] El corte del perfil exento va DESPUES de las rutas
+// protegidas: un manifiesto anidado con `profile: exento` dejaba escribir la zona
+// roja sin mirar la firma. El pre-commit ya las comprobaba en todos los perfiles.
 
 const MOD_AUTO_GATE = path.join(ECOSYSTEM_ROOT, 'Tools', 'PlantillaRepos', 'scripts', 'utils', 'auto-gate.cjs');
 
@@ -188,6 +199,7 @@ const FIJOS_PROTEGIDOS = [
   '**/.claude/ecosystem.json', '**/CLAUDE.md', '**/AGENTS.md', '**/MEMORIA.md',
   '**/.claude/agents/**', '**/.claude/commands/**', '**/.claude/state/tareas/**',
   '**/.secrets/**', '**/*.kdbx', '**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/id_rsa*', '**/id_ed25519*',
+  '**/.claude/plugins/**',
 ];
 const EXCEPCIONES_ENV = new Set(['.env.example', '.env.template', '.env.sample', '.env.test']);
 
@@ -222,10 +234,32 @@ function protegidaSinAutoGate(forma) {
   return FIJOS_PROTEGIDOS.some((g) => globARegex(g).test(abs)) ? 'plano de control o secretos' : null;
 }
 function protegidaSinAutoGateAlguna() {
+  if (fueraDelRepo) {
+    const fuera = FIJOS_FUERA.map(globARegex);
+    const casa = (f) => !EXCEPCIONES_ENV.has(path.basename(f).toLowerCase()) && fuera.some((r) => r.test(path.resolve(f).replace(/\\/g, '/')));
+    return casa(filePath) || casa(filePathReal) ? 'ajustes, ganchos o secretos fuera del repo' : null;
+  }
   return protegidaSinAutoGate(filePath) || protegidaSinAutoGate(filePathReal);
 }
 
+// [0141][segunda revision] Lo que se comprueba fuera del repo.
+const FIJOS_FUERA = [
+  '**/.claude/settings.json', '**/.claude/settings.local.json', '**/.claude/hooks/**',
+  '**/.secrets/**', '**/*.kdbx', '**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/id_rsa*', '**/id_ed25519*',
+];
+
+// [0141][segunda revision] Un enlace duro deja escribir el original por otro
+// nombre que no casa con ningun globo: se bloquea siempre.
+function enlaceDuro() {
+  try {
+    return fs.statSync(filePath).nlink > 1;
+  } catch {
+    return false;
+  }
+}
+
 function comprobarProtegida() {
+  if (enlaceDuro()) return { tipo: 'un enlace duro', motivo: 'el archivo tiene otro nombre en disco y podria ser una ruta protegida; se escribe por su ruta original' };
   let g = null;
   try {
     // auto-gate fija su raiz al cargarse: que sea la misma que la de este gancho.
@@ -244,7 +278,15 @@ function comprobarProtegida() {
     const tipo = protegidaSinAutoGateAlguna();
     return tipo ? { tipo, motivo: `no se pudo clasificar (${String(e.message).slice(0, 120)}); fallo cerrado con los globos fijos` } : null;
   }
+  // [0141][tercera revision] Fuera del repo, los globos fijos de fuera cuentan
+  // aunque auto-gate no clasifique la ruta (los plugins de ~/.claude, por ejemplo).
+  const fijoFuera = fueraDelRepo ? protegidaSinAutoGateAlguna() : null;
+  if (fijoFuera && !c.control.length && !c.roja.length) c = { control: [filePath], roja: [] };
   if (!c.control.length && !c.roja.length) return null;
+  if (fueraDelRepo && !fijoFuera) {
+    const nucleo = typeof g.tocaNucleoDelGate === 'function' ? g.tocaNucleoDelGate([filePath, filePathReal]) : [];
+    if (!c.roja.length && !nucleo.length) return null;
+  }
   const tipo = c.control.length ? 'plano de control' : `zona roja (${c.roja[0].motivo})`;
   // [0136][seguridad 9] Si la comprobacion de la firma lanza, se bloquea.
   try {
@@ -257,6 +299,8 @@ function comprobarProtegida() {
 
 const protegida = comprobarProtegida();
 if (protegida) bloquear(rel, protegida.tipo, protegida.motivo);
+if (fueraDelRepo) process.exit(0); // fuera del repo: el resto no es asunto de este gate
+if (mode === 'ninguno') process.exit(0);
 
 // glob minimo: ** = cualquier subpath, * = un segmento
 function matchGlob(glob, p) {
